@@ -62,9 +62,14 @@ fn main() {
     let mut stream = IcicleStream::create().unwrap();
     warmup(&stream).unwrap();
 
+    // pts_ms   = point-prep: host->device transfer + precompute-table build (shared basis)
+    // msm_ms   = compute only, bases already resident on device (msm runs once)
+    // total_ms = pts_ms + msm_ms
+    // NOTE: scalar host->device transfer is still counted inside msm_ms (scalars
+    //       are passed as a host slice). The pts term is purely the basis/point cost.
     println!(
-        "{:>4} {:>9} {:>7} {:>4} {:>10} {:>13}",
-        "T", "cols", "rows", "pf", "lat_ms", "Mscalar/s"
+        "{:>4} {:>9} {:>7} {:>4} {:>10} {:>10} {:>10} {:>13}",
+        "T", "cols", "rows", "pf", "msm_ms", "pts_ms", "total_ms", "Mscalar/s"
     );
 
     for &t in &t_log2s {
@@ -84,26 +89,35 @@ fn main() {
             cfg.precompute_factor = pf as i32;
             cfg.ext.set_int(CUDA_MSM_LARGE_BUCKET_FACTOR, 5);
 
-            // precompute the shared basis ONCE per (cols, pf) — amortized across all rows
+            // buffers malloc'd OUTSIDE the timers (assume preallocated/reused).
+            // shared basis is precomputed ONCE per (cols, pf) — amortized across all rows.
             let mut precomp = DeviceVec::<Affine>::malloc(pf * cols);
-            precompute_bases::<P>(bases.into_slice(), &cfg, &mut precomp).unwrap();
 
             // scalar matrix, row-major concatenated: [rows x cols] = 2^T scalars
             let scalars = Scalar::generate_random(full);
             let scalars_h = scalars.into_slice();
             let mut results = DeviceVec::<P>::malloc(rows);
 
-            // single timed batched-MSM call (sync to capture full GPU time)
-            let timer = Instant::now();
+            // (A) point-prep: host->device transfer + precompute-table build (shared basis)
+            let t_pts = Instant::now();
+            precompute_bases::<P>(bases.into_slice(), &cfg, &mut precomp).unwrap();
+            stream.synchronize().unwrap();
+            let pts_s = t_pts.elapsed().as_secs_f64();
+
+            // (B) compute-only: bases now resident on device (batched msm runs once)
+            let t_msm = Instant::now();
             msm(scalars_h, precomp.into_slice(), &cfg, results.into_slice_mut()).unwrap();
             stream.synchronize().unwrap();
-            let per_call = timer.elapsed().as_secs_f64();
+            let msm_s = t_msm.elapsed().as_secs_f64();
 
-            let lat_ms = per_call * 1e3;
-            let mscalar_s = (full as f64) / per_call / 1e6;
+            let total_s = pts_s + msm_s;
+            let msm_ms = msm_s * 1e3;
+            let pts_ms = pts_s * 1e3;
+            let total_ms = total_s * 1e3;
+            let mscalar_s = (full as f64) / msm_s / 1e6; // compute-only throughput
             println!(
-                "{:>4} {:>9} {:>7} {:>4} {:>10.3} {:>13.1}",
-                t, cols, rows, pf, lat_ms, mscalar_s
+                "{:>4} {:>9} {:>7} {:>4} {:>10.3} {:>10.3} {:>10.3} {:>13.1}",
+                t, cols, rows, pf, msm_ms, pts_ms, total_ms, mscalar_s
             );
         }
     }
