@@ -52,3 +52,7 @@ harness = false
 [[bench]]
 name = "ecntt"
 harness = false
+
+[[bench]]
+name = "hyrax_msm"
+harness = false
