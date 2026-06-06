@@ -24,8 +24,9 @@ type P = G1Projective;
 type Scalar = <P as Projective>::ScalarField;
 type Affine = <P as Projective>::Affine;
 
-const BITSIZE: u32 = 255; // BLS12-381 scalar bit length
 const N_LOG2S: &[u32] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25];
+const WINDOW_SIZES: &[i32] = &[4, 5, 6, 7, 8, 9, 10, 11, 12];
+const PRECOMPUTE_FACTORS: &[i32] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 fn main() {
     let _ = load_backend_from_env_or_default();
@@ -53,20 +54,18 @@ fn main() {
         let size = 1usize << n;
         let bases = generate_random_affine_points_with_zeroes::<Affine>(size, 0);
 
-        // sweep c around the known-points optimum log2(size) - 1
-        for c in (n.saturating_sub(3).max(1))..=(n + 1) {
-            // pf up to ceil(BITSIZE/c): the single-bucket-module point (beyond = wasted memory)
-            for pf in 1..=((BITSIZE + c - 1) / c) as usize {
+        for &c in WINDOW_SIZES {
+            for &pf in PRECOMPUTE_FACTORS {
                 let mut cfg = MSMConfig::default();
                 cfg.stream_handle = *stream;
                 cfg.is_async = true;
-                cfg.c = c as i32;
-                cfg.precompute_factor = pf as i32;
+                cfg.c = c;
+                cfg.precompute_factor = pf;
                 cfg.ext.set_int(CUDA_MSM_LARGE_BUCKET_FACTOR, 10);
 
                 let scalars = Scalar::generate_random(size);
                 let scalars_h = scalars.into_slice();
-                let mut precomp = DeviceVec::<Affine>::malloc(pf * size);
+                let mut precomp = DeviceVec::<Affine>::malloc(pf as usize * size);
                 let mut result = DeviceVec::<P>::malloc(1);
 
                 // (A) point-prep
