@@ -26,7 +26,7 @@ type Affine = <P as Projective>::Affine;
 
 const N_LOG2S: &[u32] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25];
 const WINDOW_SIZES: &[i32] = &[4, 5, 6, 7, 8, 9, 10, 11, 12];
-const PRECOMPUTE_FACTORS: &[i32] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+const PRECOMPUTE_FACTORS: &[i32] = &[1, 2, 4, 8];
 
 fn main() {
     let _ = load_backend_from_env_or_default();
